@@ -17,9 +17,7 @@ import keras_tuner as kt
 
 #TODO: Load a Time-Series Application
 
-csv_files = glob.glob('/home/arnorton/NCP_Testing/size_02sec_10ts_stride_03ts/*.csv')
-
-
+#Since we want to tune for generalization, we split the dataset into subjects
 csv_files = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/*.csv')
 zero_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_0*.csv')
 one_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_1*.csv')
@@ -33,19 +31,13 @@ eight_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_0
 nine_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_9*.csv')
 
 
-'''
-x_train = pd.DataFrame()
-for csv_file in csv_files:
-    df = pd.read_csv(csv_file)
-    x_train = pd.concat([x_train, df])
 
-'''
 train_subjects = 0
 test_subjects = 0
 x_train = pd.DataFrame()
 x_test = pd.DataFrame()
 
-
+#Load all data from each file except zero subjects
 for csv_file in one_subjects:
     df = pd.read_csv(csv_file)
     x_train = pd.concat([x_train, df])
@@ -85,22 +77,25 @@ for csv_file in nine_subjects:
 
 
 
+#Load the zero subjects one by one to test generalization. 
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_07.csv')
-x_test = pd.concat([x_test, df])
-#df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_01.csv')
-#x_test = pd.concat([x_test, df])
-#df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_05.csv')
-#x_test = pd.concat([x_test, df])
+#Test data is first concated from the training data to include seen data. 
+x_test = pd.concat([x_train, df])
 
+#Further data is added to the test data. 
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_01.csv')
-x_train = pd.concat([x_train, df])
+x_test = pd.concat([x_test, df])
+#Last bit of data is being added to training data, but this could be added to test data, depends on current iteration of testing.
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_05.csv')
 x_train = pd.concat([x_train, df])
-train_subjects = train_subjects + 2
-test_subjects = test_subjects + 1
+
+#Change number of train_subjects vs. test_subjects based on above configuration. 
+train_subjects = train_subjects + 1
+test_subjects = test_subjects + 2
 
 
 
+#Load the labeled data.
 y_train = x_train.loc[:, ['chunk', 'label']]
 x_train.pop('chunk')
 x_train.pop('label')
@@ -108,10 +103,12 @@ x_train.pop('label')
 
 x_train = np.array(x_train)
 print(x_train.shape)
+#Reshape based on the amount of samples in the window
 reshape = int(x_train.shape[0]/150)
 print(reshape)
 x_train = x_train.reshape(reshape, 150, 8)
 
+#You can choose to pre-process the data, in this case we abstain from doing so.
 #x_train = (x_train - np.mean(x_train, axis = 0)) / np.std(x_train, axis = 0)
 
 x_train = x_train.astype(np.float32)
@@ -126,7 +123,7 @@ y_train = array
 y_train = y_train.astype(np.int8)
 
 
-
+#Do the same as above but with the test data.
 y_test = x_test.loc[:, ['chunk', 'label']]
 x_test.pop('chunk')
 x_test.pop('label')
@@ -138,6 +135,7 @@ reshape = int(x_test.shape[0]/150)
 print(reshape)
 x_test = x_test.reshape(reshape, 150, 8)
 
+#You can choose to pre-process the data, in this case we abstain from doing so. 
 #x_test = (x_test - np.mean(x_test, axis = 0)) / np.std(x_test, axis = 0)
 
 x_test = x_test.astype(np.float32)
@@ -151,12 +149,9 @@ for i in range(0, reshape - 1):
 y_test = array
 y_test = y_test.astype(np.int8)
 
-
-
-
 input = tf.keras.layers.Input(shape = (150, 8))
 
-
+#Load a CNN Model for hyperparemeter tuning
 def CNN_model_builder(hp):
     
     hp_c1 = hp.Int('conv units', min_value=32, max_value = 128, step = 32)
@@ -194,6 +189,8 @@ def CNN_model_builder(hp):
     
     return model
 
+#Use hyperband, as this is a quick and effective method. Other possibilities for hypertuning are grid search where it goes over every possible parameter
+#and bayesian optimization which takes a bit longer than hyperband but with generally better results.
 tuner = kt.Hyperband(CNN_model_builder,
                      objective = 'val_accuracy',
                      max_epochs = 10,
@@ -203,14 +200,16 @@ tuner = kt.Hyperband(CNN_model_builder,
                      directory = '',
                      project_name = "CNN_Tuning_Project")
 
+#If the model isn't improving over 5 batches, stop the testing and move onto a different iteration of the model
 stop_early = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 5)
 
+#Search for the best parameters for the model!
 tuner.search(x_train, y_train, epochs = 50, validation_data = (x_test, y_test), callbacks = [stop_early])
 
 best_hps = tuner.get_best_hyperparameters(num_trials = 1)[0]
 
 
-
+#Rebuild the CNN model with these hyperparameters and re-train to determine the best epoch.
 model = tuner.hypermodel.build(best_hps)
 history = model.fit(x_train, y_train, epochs=20, validation_data = (x_test, y_test))
 
@@ -225,7 +224,7 @@ hypermodel.summary()
 
 
 
-# Retrain the model
+# Retrain the model once again upto the best epoch and record results below. 
 hypermodel.fit(x_train, y_train, epochs=best_epoch, validation_data = (x_test, y_test))
 
 eval_result = hypermodel.evaluate(x_test, y_test)
@@ -241,6 +240,4 @@ and the best optimal learning rate for the optimizer
 is {best_hps.get('learning_rate')}. 
 """)
 
-print("150ts")
-print("Full amount of layers")
 

@@ -20,14 +20,6 @@ def LTC_NCP(input, ncp_size, ncp_output_size, ncp_sparsity_level):
     #Set up architecture for Neural Circuit Policy
     wiring = ncps.wirings.AutoNCP(ncp_size, ncp_output_size, ncp_sparsity_level)
     #Begin constructing layer, starting with input
-    
-    '''model = tf.keras.models.Sequential(
-        [
-            keras.layers.InputLayer(input_shape = (None, 8)),
-            CfC(wiring),
-            tf.keras.layers.Dense(1)
-        ]
-    )'''
     x = tf.keras.layers.Conv1D(32, 3)(input)
     x = tf.keras.layers.MaxPool1D(3)(x)
     x = LTC(wiring, return_sequences= True)(x)
@@ -35,34 +27,10 @@ def LTC_NCP(input, ncp_size, ncp_output_size, ncp_sparsity_level):
     output = tf.keras.layers.Dense(4)(x)
 
     model = tf.keras.Model(inputs = input, outputs = output)
-    
-    
     #Return model
     return model
 
-def LTC_FullyConnected(input, ncp_size, ncp_output_size, ncp_sparsity_level):
-    #Set up architecture for Neural Circuit Policy
-    wiring = ncps.wirings.FullyConnected(ncp_size, ncp_output_size)
-    #Begin constructing layer, starting with input
-    
-    '''model = tf.keras.models.Sequential(
-        [
-            keras.layers.InputLayer(input_shape = (None, 8)),
-            CfC(wiring),
-            tf.keras.layers.Dense(1)
-        ]
-    )'''
-    x = tf.keras.layers.Conv1D(32, 3)(input)
-    x = tf.keras.layers.MaxPool1D(3)(x)
-    x = LTC(wiring, return_sequences= True)(x)
-    x = tf.keras.layers.Flatten()(x)
-    output = tf.keras.layers.Dense(4)(x)
 
-    model = tf.keras.Model(inputs = input, outputs = output)
-    
-    
-    #Return model
-    return model
 
 
 
@@ -73,13 +41,13 @@ def CNN(input):
     x = tf.keras.layers.MaxPool1D(3)(x)
     x = tf.keras.layers.Dropout(.5)(x)
 
-    #x = tf.keras.layers.Conv1D(32, 3)(x)
-    #x = tf.keras.layers.MaxPool1D(3)(x)
-    #x = tf.keras.layers.Dropout(.5)(x)
+    x = tf.keras.layers.Conv1D(32, 3)(x)
+    x = tf.keras.layers.MaxPool1D(3)(x)
+    x = tf.keras.layers.Dropout(.5)(x)
 
-    #x = tf.keras.layers.Conv1D(32, 3)(x)
-    #x = tf.keras.layers.MaxPool1D(3)(x)
-    #x = tf.keras.layers.Dropout(.5)(x)
+    x = tf.keras.layers.Conv1D(32, 3)(x)
+    x = tf.keras.layers.MaxPool1D(3)(x)
+    x = tf.keras.layers.Dropout(.5)(x)
 
     x = tf.keras.layers.Flatten()(x)
 
@@ -90,8 +58,7 @@ def CNN(input):
     
     return tf.keras.Model(inputs = input, outputs = output)
 
-#TODO: Load a Time-Series Application
-
+#Divide the dataset into separate subjects
 csv_files = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/*.csv')
 zero_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_0*.csv')
 one_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_1*.csv')
@@ -105,19 +72,13 @@ eight_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_0
 nine_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_9*.csv')
 
 
-'''
-x_train = pd.DataFrame()
-for csv_file in csv_files:
-    df = pd.read_csv(csv_file)
-    x_train = pd.concat([x_train, df])
 
-'''
 train_subjects = 0
 test_subjects = 0
 x_train = pd.DataFrame()
 x_test = pd.DataFrame()
 
-
+#Load files 1-9 in training
 for csv_file in one_subjects:
     df = pd.read_csv(csv_file)
     x_train = pd.concat([x_train, df])
@@ -156,23 +117,24 @@ for csv_file in nine_subjects:
     train_subjects = train_subjects + 1
 
 
-
+#Load the zero subjects one by one to test generalization. 
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_07.csv')
+#Test data is first concated from the training data to include seen data. 
 x_test = pd.concat([x_train, df])
-#df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_01.csv')
-#x_test = pd.concat([x_test, df])
-#df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_05.csv')
-#x_test = pd.concat([x_test, df])
 
+#Further data is added to the test data. 
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_01.csv')
 x_test = pd.concat([x_test, df])
+#Last bit of data is being added to training data, but this could be added to test data, depends on current iteration of testing.
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_05.csv')
 x_train = pd.concat([x_train, df])
+
+#Change number of train_subjects vs. test_subjects based on above configuration. 
 train_subjects = train_subjects + 1
 test_subjects = test_subjects + 2
 
 
-
+#Load the labeled data.
 y_train = x_train.loc[:, ['chunk', 'label']]
 x_train.pop('chunk')
 x_train.pop('label')
@@ -180,10 +142,12 @@ x_train.pop('label')
 
 x_train = np.array(x_train)
 print(x_train.shape)
+#Reshape based on the amount of samples in the window
 reshape = int(x_train.shape[0]/150)
 print(reshape)
 x_train = x_train.reshape(reshape, 150, 8)
 
+#You can choose to pre-process the data, in this case we abstain from doing so.
 #x_train = (x_train - np.mean(x_train, axis = 0)) / np.std(x_train, axis = 0)
 
 x_train = x_train.astype(np.float32)
@@ -198,7 +162,7 @@ y_train = array
 y_train = y_train.astype(np.int8)
 
 
-
+#Do the same as above but with the test data.
 y_test = x_test.loc[:, ['chunk', 'label']]
 x_test.pop('chunk')
 x_test.pop('label')
@@ -210,6 +174,7 @@ reshape = int(x_test.shape[0]/150)
 print(reshape)
 x_test = x_test.reshape(reshape, 150, 8)
 
+#You can choose to pre-process the data, in this case we abstain from doing so. 
 #x_test = (x_test - np.mean(x_test, axis = 0)) / np.std(x_test, axis = 0)
 
 x_test = x_test.astype(np.float32)
@@ -230,23 +195,20 @@ input = tf.keras.layers.Input(shape = (150, 8))
 
 LTC_NCP_model = LTC_NCP(input, 100, 5, .5)
 CNN_model = CNN(input)
-#LTC_FullyConnected_model = LTC_FullyConnected(input, 100, 5, .2)
 
+#Best hyperparameters determined by hyperparemeter tuning. Subject to change. 
 base_lr = .02
 train_steps = reshape // 64
 decay_lr = .66
 clipnorm = .9999
 
-#x_train, x_test, y_train, y_test = train_test_split(x_train, y_train, test_size = .33, shuffle = True)
-
-
+#Create learning function
 learning_rate_fn = tf.keras.optimizers.schedules.ExponentialDecay(
         base_lr, train_steps, decay_lr
     )
 
 
-#fc_optimizer = tf.keras.optimizers.Adam(learning_rate_fn, clipnorm = clipnorm)
-#fc_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits = True)
+
 
 ncp_optimizer = tf.keras.optimizers.Adam(learning_rate_fn, clipnorm = clipnorm)
 ncp_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits = True)
@@ -256,17 +218,22 @@ cnn_loss_fun = tf.keras.losses.SparseCategoricalCrossentropy(from_logits = True)
 
 CNN_model.compile(optimizer = cnn_optimizer, loss = cnn_loss_fun, metrics = tf.keras.metrics.SparseCategoricalAccuracy())
 LTC_NCP_model.compile(optimizer = ncp_optimizer, loss = ncp_loss, metrics = tf.keras.metrics.SparseCategoricalAccuracy())
-#LTC_FullyConnected_model.compile(optimizer=fc_optimizer, loss = fc_loss, metrics = tf.keras.metrics.SparseCategoricalAccuracy())
 
-#CNN_model.fit(x_train, y_train, validation_split= .33, batch_size=  64, epochs=5, verbose = 1)
+CNN_model.fit(x_train, y_train, validation_split= .33, batch_size=  64, epochs=5, verbose = 1)
 LTC_NCP_model.fit(x_train, y_train, validation_split= .33, batch_size=  64, epochs=5, verbose = 1)
 
 
 
-results = LTC_NCP_model.evaluate(x_test, y_test, 64, 1)
-#results = CNN_model.evaluate(x_test, y_test, 64, 1)
+NCP_results = LTC_NCP_model.evaluate(x_test, y_test, 64, 1)
+CNN_results = CNN_model.evaluate(x_test, y_test, 64, 1)
 
 print("LTC-NCP")
 print("Train_subjects: " + str(train_subjects))
 print("Test_subjects: " + str(test_subjects))
-print("Accuracy: " + str(results[1]))
+print("Accuracy: " + str(NCP_results[1]))
+
+print("CNN")
+print("Train_subjects: " + str(train_subjects))
+print("Test_subjects: " + str(test_subjects))
+print("Accuracy: " + str(CNN_results[1]))
+

@@ -19,6 +19,7 @@ import argparse
 
 keras = tf.keras
 
+#Load a model for LTC_NCP
 def LTC_NCP(input, ncp_size, ncp_output_size, ncp_sparsity_level):
     #Set up architecture for Neural Circuit Policy
     wiring = ncps.wirings.AutoNCP(ncp_size, ncp_output_size, ncp_sparsity_level)
@@ -43,31 +44,7 @@ def LTC_NCP(input, ncp_size, ncp_output_size, ncp_sparsity_level):
     #Return model
     return model
 
-def LTC_FullyConnected(input, ncp_size, ncp_output_size, ncp_sparsity_level):
-    #Set up architecture for Neural Circuit Policy
-    wiring = ncps.wirings.FullyConnected(ncp_size, ncp_output_size)
-    #Begin constructing layer, starting with input
-    
-    '''model = tf.keras.models.Sequential(
-        [
-            keras.layers.InputLayer(input_shape = (None, 8)),
-            CfC(wiring),
-            tf.keras.layers.Dense(1)
-        ]
-    )'''
-    x = tf.keras.layers.Conv1D(32, 3)(input)
-    x = tf.keras.layers.MaxPool1D(3)(x)
-    x = LTC(wiring, return_sequences= True)(x)
-    x = keras.layers.Flatten()(x)
-    output = tf.keras.layers.Dense(4)(x)
-
-    model = tf.keras.Model(inputs = input, outputs = output)
-    
-    
-    #Return model
-    return model
-
-
+#Load dataset
 csv_files = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/*.csv')
 
 
@@ -77,12 +54,7 @@ for csv_file in csv_files:
     df = pd.read_csv(csv_file)
     x_train = pd.concat([x_train, df])
 
-
-
-
-#csv_file = pd.read_csv('size_30sec_150ts_stride_03ts\sub_1.csv')
-#x_train = csv_file.copy()
-
+#Collect labeled data
 y_train = x_train.loc[:, ['chunk', 'label']]
 x_train.pop('chunk')
 x_train.pop('label')
@@ -90,6 +62,7 @@ x_train.pop('label')
 
 x_train = np.array(x_train)
 print(x_train.shape)
+#Reshape based on amount of samples in the window 
 reshape = int(x_train.shape[0]/150)
 print(reshape)
 x_train = x_train.reshape(reshape, 150, 8)
@@ -109,14 +82,14 @@ y_train = y_train.astype(np.int8)
 
 input = tf.keras.layers.Input(shape = (150, 8))
 
-
+#Initialize model to place weights in
 LTC_NCP_model = LTC_NCP(input, 100, 5, .5)
-LTC_FullyConnected_model = LTC_FullyConnected(input, 100, 5, .2)
+
 print("\n")
 print("Loading Models: ")
+#Load models from folders. It's important that the LTC_NCP weights match the LTC_NCP_model configuration (i.e. same amount of units, sparsity level,etc.)
 CNN_model = keras.models.load_model('CNN_Model/saved_model' )
 LTC_NCP_model.load_weights('LTC_NCP_Model/saved_model.weights.h5')
-LTC_FullyConnected_model.load_weights('LTC_FullyConnected_Model/saved_model.weights.h5')
 
 
 
@@ -130,18 +103,18 @@ learning_rate_fn = tf.keras.optimizers.schedules.ExponentialDecay(
     )
 
 
-cfc_optimizer = tf.keras.optimizers.Adam(learning_rate_fn, clipnorm = clipnorm)
+ncp_optimizer = tf.keras.optimizers.Adam(learning_rate_fn, clipnorm = clipnorm)
 
-cfc_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits = True)
+ncp_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits = True)
 
-LTC_NCP_model.compile(cfc_optimizer, cfc_loss,  metrics = tf.keras.metrics.SparseCategoricalAccuracy())
-LTC_FullyConnected_model.compile(cfc_optimizer, cfc_loss, metrics = tf.keras.metrics.SparseCategoricalAccuracy())
+LTC_NCP_model.compile(ncp_optimizer, ncp_loss,  metrics = tf.keras.metrics.SparseCategoricalAccuracy())
 
 cnn_optimizer = tf.keras.optimizers.Adam()
 
 cnn_loss_fun = tf.keras.losses.SparseCategoricalCrossentropy(from_logits = True)
 CNN_model.compile(optimizer = cnn_optimizer, loss = cnn_loss_fun, metrics = tf.keras.metrics.SparseCategoricalAccuracy())
 
+#Shuffle dataset randomly
 x_train, x_valid, y_train, y_valid = train_test_split(x_train, y_train, test_size = .66, shuffle = True)
 noise_x = []
 CNN_accuracy = []
@@ -158,29 +131,22 @@ LTC_NCP_results = LTC_NCP_model.evaluate(x_valid, y_valid, verbose = 1)
 print("Begin iterative noise testing: ")
 
 for i in range(0, 100, 1):
+    #Add a guassian noise distribution, slowly increasing the amount of noise affecting the test data.
     noise_copy = x_valid + np.random.normal(0, float(float(i) / 100), x_valid.shape)
-    
+    #Pre-process so everything is between zero and one, this makes it faster to evaluate
     noise_copy = (noise_copy - np.mean(noise_copy, axis = 0)) / np.std(noise_copy, axis = 0)
-
     CNN_results = CNN_model.evaluate(noise_copy, y_valid, verbose = 1)
     LTC_NCP_results = LTC_NCP_model.evaluate(noise_copy, y_valid, verbose = 1)
-    LTC_FC_results = LTC_FullyConnected_model.evaluate(noise_copy, y_valid, verbose = 1)
-    #print("Noise: " + str(float(float(i)/100)))
-    #print("CNN_accuracy: " + str(CNN_results[1]))
-    #print("LTC_NCP accuracy: " + str(LTC_NCP_results[1]))
+    #Add values to list
     noise_x.append(float(float(i) / 100))
     CNN_accuracy.append(CNN_results[1])
     LTC_NCP_accuracy.append(LTC_NCP_results[1])
-    LTC_FC_accuracy.append(LTC_FC_results[1])
 
     
 
 
 
-#plt.plot(noise_x, CNN_accuracy, label = "CNN", linestyle = ":")
-#plt.plot(noise_x, LTC_NCP_accuracy, label = "LTC_NCP", linestyle = ":")
-
-#plt.show(block = True)
+#Print out results
 print("CNN accuracy: ")
 for i in range(0, 100, 1):
     print(CNN_accuracy[i])
@@ -193,7 +159,7 @@ print("LTC_FC_accuracy")
 for i in range(0, 100, 1):
     print(LTC_FC_accuracy[i])
 
-print("Finished, did guassian")
+print("Finished, did guassian noise distribution!")
 
 
 

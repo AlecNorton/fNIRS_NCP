@@ -2,8 +2,8 @@
 #SBATCH -N 1
 #SBATCH -n 10
 #SBATCH --mem=5g
-#SBATCH -J "LTC_Save_model - Alec Norton"
-#SBATCH -t 12:00:00
+#SBATCH -J "Noise_Test - Alec Norton"
+#SBATCH -p short
 #SBATCH --gres=gpu:2
 #SBATCH -C A100|V100
 module load python/3.10.2
@@ -19,4 +19,4 @@ pip install matplotlib
 
 module load cuda12.2
 
-python LTC_NCP_Save_Model.py
+python CNN_Crossfold_Validation.py ${1} ${2} ${3}

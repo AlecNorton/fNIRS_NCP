@@ -11,17 +11,13 @@ import time
 from sklearn.model_selection import train_test_split
 import keras_tuner as kt
 
-
-class CustomCallback(tf.keras.callbacks.Callback):
-    def on_batch_end(self, batch, logs = None):
-        if(logs["loss"] > 5000):
-            self.model.stop_training = True
 #Actual Execution of Code: 
 
 #Load Data Here
 
 #TODO: Load a Time-Series Application
 
+#Since we want to tune for generalization, we split the dataset into subjects
 csv_files = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/*.csv')
 zero_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_0*.csv')
 one_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_1*.csv')
@@ -35,19 +31,13 @@ eight_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_0
 nine_subjects = glob.glob('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_9*.csv')
 
 
-'''
-x_train = pd.DataFrame()
-for csv_file in csv_files:
-    df = pd.read_csv(csv_file)
-    x_train = pd.concat([x_train, df])
 
-'''
 train_subjects = 0
 test_subjects = 0
 x_train = pd.DataFrame()
 x_test = pd.DataFrame()
 
-
+#Load all data from each file except zero subjects
 for csv_file in one_subjects:
     df = pd.read_csv(csv_file)
     x_train = pd.concat([x_train, df])
@@ -87,22 +77,25 @@ for csv_file in nine_subjects:
 
 
 
+#Load the zero subjects one by one to test generalization. 
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_07.csv')
-x_test = pd.concat([x_test, df])
-#df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_01.csv')
-#x_test = pd.concat([x_test, df])
-#df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_05.csv')
-#x_test = pd.concat([x_test, df])
+#Test data is first concated from the training data to include seen data. 
+x_test = pd.concat([x_train, df])
 
+#Further data is added to the test data. 
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_01.csv')
-x_train = pd.concat([x_train, df])
+x_test = pd.concat([x_test, df])
+#Last bit of data is being added to training data, but this could be added to test data, depends on current iteration of testing.
 df = pd.read_csv('/home/arnorton/NCP_Testing/size_30sec_150ts_stride_03ts/sub_05.csv')
 x_train = pd.concat([x_train, df])
-train_subjects = train_subjects + 2
-test_subjects = test_subjects + 1
+
+#Change number of train_subjects vs. test_subjects based on above configuration. 
+train_subjects = train_subjects + 1
+test_subjects = test_subjects + 2
 
 
 
+#Load the labeled data.
 y_train = x_train.loc[:, ['chunk', 'label']]
 x_train.pop('chunk')
 x_train.pop('label')
@@ -110,10 +103,12 @@ x_train.pop('label')
 
 x_train = np.array(x_train)
 print(x_train.shape)
+#Reshape based on the amount of samples in the window
 reshape = int(x_train.shape[0]/150)
 print(reshape)
 x_train = x_train.reshape(reshape, 150, 8)
 
+#You can choose to pre-process the data, in this case we abstain from doing so.
 #x_train = (x_train - np.mean(x_train, axis = 0)) / np.std(x_train, axis = 0)
 
 x_train = x_train.astype(np.float32)
@@ -128,7 +123,7 @@ y_train = array
 y_train = y_train.astype(np.int8)
 
 
-
+#Do the same as above but with the test data.
 y_test = x_test.loc[:, ['chunk', 'label']]
 x_test.pop('chunk')
 x_test.pop('label')
@@ -140,6 +135,7 @@ reshape = int(x_test.shape[0]/150)
 print(reshape)
 x_test = x_test.reshape(reshape, 150, 8)
 
+#You can choose to pre-process the data, in this case we abstain from doing so. 
 #x_test = (x_test - np.mean(x_test, axis = 0)) / np.std(x_test, axis = 0)
 
 x_test = x_test.astype(np.float32)
@@ -153,14 +149,9 @@ for i in range(0, reshape - 1):
 y_test = array
 y_test = y_test.astype(np.int8)
 
-
-
-
 input = tf.keras.layers.Input(shape = (150, 8))
 
-batch_size = 64
-
-
+#Load a LTC NCP Model for hyperparemeter tuning
 def LTC_NCP_model_builder(hp):
     '''
     inter_neuron = hp.Int('inter_neurons', min_value = 5, max_value = 30, step = 1)
@@ -196,7 +187,7 @@ def LTC_NCP_model_builder(hp):
     #decay_lr = .66
     #hp_clipnorm = .9999
     hp_clipnorm = hp.Float('clipnorm', min_value = .1, max_value = 1, step = .1)
-    train_steps = reshape // batch_size
+    train_steps = reshape // 64
     decay_lr = hp.Float('decay_lr', min_value = 0, max_value = 1, step = .1)
 
 
@@ -211,70 +202,54 @@ def LTC_NCP_model_builder(hp):
     
     return model
 
+#Use hyperband, as this is a quick and effective method. Other possibilities for hypertuning are grid search where it goes over every possible parameter
+#and bayesian optimization which takes a bit longer than hyperband but with generally better results.
 tuner = kt.Hyperband(LTC_NCP_model_builder,
                      objective = 'val_accuracy',
                      max_epochs = 10,
+                     factor = 3,
                      overwrite = True,
+                     distribution_strategy=tf.distribute.MirroredStrategy(),
                      directory = '',
-                     distribution_strategy = tf.distribute.MirroredStrategy(),
                      project_name = "LTC_NCP_Tuning_Project")
 
-stop_early = CustomCallback()
-stop_early1 = tf.keras.callbacks.TerminateOnNaN()
-stop_early2 = tf.keras.callbacks.EarlyStopping(monitor = 'loss', mode = "min", patience = 2)
+#If the model isn't improving over 5 batches, stop the testing and move onto a different iteration of the model
+stop_early = tf.keras.callbacks.EarlyStopping(monitor = 'val_loss', patience = 5)
 
-print("Begin searching")
-
-tuner.search(x_train, y_train, epochs = 5, validation_data = (x_test, y_test), callbacks = [stop_early, stop_early1, stop_early2], verbose = 1, batch_size = batch_size)
+#Search for the best parameters for the model!
+tuner.search(x_train, y_train, epochs = 50, validation_data = (x_test, y_test), callbacks = [stop_early])
 
 best_hps = tuner.get_best_hyperparameters(num_trials = 1)[0]
 
 
+#Rebuild the CNN model with these hyperparameters and re-train to determine the best epoch.
 model = tuner.hypermodel.build(best_hps)
-history = model.fit(x_train, y_train, epochs=20, validation_data = (x_test, y_test), verbose = 1, batch_size = batch_size)
+history = model.fit(x_train, y_train, epochs=20, validation_data = (x_test, y_test))
 
 val_acc_per_epoch = history.history['val_accuracy']
 best_epoch = val_acc_per_epoch.index(max(val_acc_per_epoch)) + 1
+print('Best epoch: %d' % (best_epoch,))
 
 
 hypermodel = tuner.hypermodel.build(best_hps)
 
-
-
-
-# Retrain the model
-hypermodel.fit(x_train, y_train, epochs=best_epoch, validation_data = (x_test, y_test), verbose = 1, batch_size = batch_size)
-
-eval_result = hypermodel.evaluate(x_test, y_test)
-
 hypermodel.summary()
 
 
-'''
-print("LTC_NCP_Testing")
+
+# Retrain the model once again upto the best epoch and record results below. 
+hypermodel.fit(x_train, y_train, epochs=best_epoch, validation_data = (x_test, y_test))
+
+eval_result = hypermodel.evaluate(x_test, y_test)
+print("[test loss, test accuracy]:", eval_result)
+
+
 print(f"""
-The hyperparameter search is complete. Optimal values below: 
-      units = {best_hps.get('units')},
-      output_size = {best_hps.get('output_size')},
-      sparsity_level = {best_hps.get('sparsity_level')}
-
-
-
-
-""")'''
-
-print("LTC_NCP_Testing")
-print(f"""
-The hyperparameter search is complete. Optimal values below: 
-      learning_rate = {best_hps.get('learning_rate')},
-      clipnorm = {best_hps.get('clipnorm')},
-      decay_lr = {best_hps.get('decay_lr')}
-
-
-
-
+The hyperparameter search is complete. The optimal number of units in the conv layer
+layer is {best_hps.get('conv units')} and the best pool kernel is {best_hps.get('pool kernel')},
+and the best dropout rate is {best_hps.get('dropout rate')}, and the best number of neurons in the dense layer is
+{best_hps.get('1st dense units')}, and the best  number of neurons in the second dense layer is {best_hps.get('2nd dense units')}
+and the best optimal learning rate for the optimizer
+is {best_hps.get('learning_rate')}. 
 """)
 
-print('Best epoch: %d' % (best_epoch,))
-print("[test loss, test accuracy]:", eval_result)
-print("150ts")

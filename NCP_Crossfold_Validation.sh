@@ -2,7 +2,7 @@
 #SBATCH -N 1
 #SBATCH -n 10
 #SBATCH --mem=5g
-#SBATCH -J "LTC_NCP_Testing - Alec Norton"
+#SBATCH -J "Noise_Test - Alec Norton"
 #SBATCH -p short
 #SBATCH --gres=gpu:2
 #SBATCH -C A100|V100
@@ -19,4 +19,4 @@ pip install matplotlib
 
 module load cuda12.2
 
-python LTC_NCP_Testing.py
+python NCP_Crossfold_Validation.py ${1} ${2} ${3} ${4} ${5} ${6} ${7} ${8}
